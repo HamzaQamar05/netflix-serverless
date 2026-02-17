@@ -1,1 +1,170 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Netflix-style serverless architecture starter (S3+CloudFront, API GW+Lambda, SQS, RDS, Redis placeholders)
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 10
+    MemorySize: 512
+    Tracing: Active
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        # Fill these after you wire real resources:
+        DB_SECRET_ARN: ""
+        REDIS_ENDPOINT: ""
+        WATCH_EVENTS_QUEUE_URL: !Ref WatchEventsQueue
+
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+
+Resources:
+  ####### S3 + CloudFront (video delivery bucket + CDN) #######
+  VideoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "video-oac-${StageName}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  VideoDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultCacheBehavior:
+          TargetOriginId: video-origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          ForwardedValues:
+            QueryString: true
+        Origins:
+          - Id: video-origin
+            DomainName: !GetAtt VideoBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !Ref CloudFrontOAC
+
+  VideoBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref VideoBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${VideoBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${VideoDistribution}"
+
+  ####### SQS (watch events) #######
+  WatchEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 345600 # 4 days
+
+  ####### API Gateway + Lambdas #######
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref StageName
+      TracingEnabled: true
+
+  CatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/catalog/
+      Handler: app.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonSQSFullAccess
+      Events:
+        GetCatalog:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /catalog
+            Method: GET
+        GetTitle:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /catalog/{titleId}
+            Method: GET
+
+  PlaybackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/playback/
+      Handler: app.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonSQSFullAccess
+      Environment:
+        Variables:
+          VIDEO_CLOUDFRONT_DOMAIN: !GetAtt VideoDistribution.DomainName
+      Events:
+        GetPlayback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /playback/{titleId}
+            Method: GET
+        PostWatchEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /watch
+            Method: POST
+
+  TrendingConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/trending_consumer/
+      Handler: app.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        WatchEvents:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt WatchEventsQueue.Arn
+            BatchSize: 10
+
+  ####### Placeholders (RDS + Redis) #######
+  # NOTE: For a starter, we keep these as placeholders because networking (VPC/Subnets/SGs)
+  # is required. You’ll add VPC resources next.
+  #
+  # Recommended: Aurora Serverless v2 (Postgres) + ElastiCache Redis in private subnets.
+
+Outputs:
+  ApiBaseUrl:
+    Description: API base URL
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  VideoBucketName:
+    Value: !Ref VideoBucket
+  CloudFrontDomain:
+    Value: !GetAtt VideoDistribution.DomainName
+  WatchEventsQueueUrl:
+    Value: !Ref WatchEventsQueue
 
