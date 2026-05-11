@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Netflix Cloud Lab</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">Cloud / SRE Portfolio Project</p>
+        <h1>Netflix-Style Streaming Backend</h1>
+        <p class="subtitle">FastAPI + PostgreSQL + Redis + Docker Compose</p>
+      </div>
+      <button id="refreshBtn">Refresh Catalog</button>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>System Health</h2>
+        <pre id="healthBox">Loading...</pre>
+      </section>
+
+      <section class="toolbar">
+        <input id="searchInput" placeholder="Search movies..." />
+        <select id="genreSelect">
+          <option value="">All genres</option>
+          <option value="Sci-Fi">Sci-Fi</option>
+          <option value="Drama">Drama</option>
+          <option value="Action">Action</option>
+          <option value="Thriller">Thriller</option>
+        </select>
+      </section>
+
+      <section id="moviesGrid" class="grid"></section>
+
+      <section class="panel">
+        <h2>Top Movies Analytics</h2>
+        <pre id="analyticsBox">Loading...</pre>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
